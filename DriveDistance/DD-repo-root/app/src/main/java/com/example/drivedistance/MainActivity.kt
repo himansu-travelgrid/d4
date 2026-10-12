@@ -37,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnMark: Button
     private lateinit var btnStop: Button
+    private lateinit var btnCenter: Button
+    private lateinit var btnReset: Button
     private lateinit var btnShare: Button
 
     private lateinit var map: MapView
@@ -53,7 +55,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // osmdroid setup: identify the app + keep tile cache inside app cache dir
         val cfg = Configuration.getInstance()
         cfg.userAgentValue = "DriveDistance/3.0 (Android; https://github.com/himansu-travelgrid/d4)"
         cfg.load(this, PreferenceManager.getDefaultSharedPreferences(this))
@@ -71,6 +72,8 @@ class MainActivity : AppCompatActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnMark = findViewById(R.id.btnMark)
         btnStop = findViewById(R.id.btnStop)
+        btnCenter = findViewById(R.id.btnCenter)
+        btnReset = findViewById(R.id.btnReset)
         btnShare = findViewById(R.id.btnShare)
         map = findViewById(R.id.map)
 
@@ -84,6 +87,13 @@ class MainActivity : AppCompatActivity() {
         }
         btnStop.setOnClickListener {
             startService(Intent(this, TripService::class.java).setAction(TripService.ACTION_STOP))
+        }
+        btnCenter.setOnClickListener { centerMapOnLocation() }
+        btnReset.setOnClickListener {
+            TripTracker.reset()
+            refresh()
+            map.controller.setZoom(5.0)
+            map.controller.setCenter(GeoPoint(20.5937, 78.9629))
         }
         btnShare.setOnClickListener {
             val text = "Trip: " + TripTracker.stopsSnapshot().joinToString(" → ") { it.label } +
@@ -113,6 +123,18 @@ class MainActivity : AppCompatActivity() {
         meMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
         meMarker.icon = ContextCompat.getDrawable(this, android.R.drawable.ic_menu_mylocation)
         meMarker.title = "You are here"
+    }
+
+    private fun centerMapOnLocation() {
+        val pts = TripTracker.snapshot()
+        if (pts.isNotEmpty()) {
+            val last = pts.last()
+            map.controller.animateTo(last)
+            if (map.zoomLevelDouble < 12.0) map.controller.setZoom(17.0)
+            return
+        }
+        map.controller.animateTo(GeoPoint(20.5937, 78.9629))
+        map.controller.setZoom(5.0)
     }
 
     private fun labelIcon(text: String, color: Int): BitmapDrawable {
@@ -193,6 +215,8 @@ class MainActivity : AppCompatActivity() {
         btnStart.isEnabled = !running
         btnMark.isEnabled = running && stops.isNotEmpty()
         btnStop.isEnabled = running
+        btnCenter.isEnabled = TripTracker.pointCount() > 0 || stops.isNotEmpty()
+        btnReset.isEnabled = true
         btnShare.isEnabled = finished && stops.size > 1
 
         tvStatus.text = when {
