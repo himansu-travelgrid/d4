@@ -25,6 +25,8 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -34,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDistance: TextView
     private lateinit var tvPoints: TextView
     private lateinit var tvLegs: TextView
+    private lateinit var tvTripTime: TextView
+    private lateinit var tvLegCount: TextView
     private lateinit var btnStart: Button
     private lateinit var btnMark: Button
     private lateinit var btnStop: Button
@@ -42,7 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnShare: Button
 
     private lateinit var map: MapView
-    private lateinit var routeLine: Polyline
+    private val routePolylines = mutableListOf<Polyline>()
     private lateinit var meMarker: Marker
     private val stopMarkers = mutableListOf<Marker>()
     private val iconCache = HashMap<String, BitmapDrawable>()
@@ -69,6 +73,8 @@ class MainActivity : AppCompatActivity() {
         tvDistance = findViewById(R.id.tvDistance)
         tvPoints = findViewById(R.id.tvPoints)
         tvLegs = findViewById(R.id.tvLegs)
+        tvTripTime = findViewById(R.id.tvTripTime)
+        tvLegCount = findViewById(R.id.tvLegCount)
         btnStart = findViewById(R.id.btnStart)
         btnMark = findViewById(R.id.btnMark)
         btnStop = findViewById(R.id.btnStop)
@@ -79,9 +85,7 @@ class MainActivity : AppCompatActivity() {
 
         setupMap()
 
-        btnStart.setOnClickListener {
-            if (hasPermissions()) startTrip() else requestPermissions()
-        }
+        btnStart.setOnClickListener { if (hasPermissions()) startTrip() else requestPermissions() }
         btnMark.setOnClickListener {
             startService(Intent(this, TripService::class.java).setAction(TripService.ACTION_MARK))
         }
@@ -114,11 +118,6 @@ class MainActivity : AppCompatActivity() {
         map.controller.setZoom(5.0)
         map.controller.setCenter(GeoPoint(20.5937, 78.9629))
 
-        routeLine = Polyline()
-        routeLine.outlinePaint.color = Color.rgb(25, 118, 210)
-        routeLine.outlinePaint.strokeWidth = 12f
-        map.overlays.add(routeLine)
-
         meMarker = Marker(map)
         meMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
         meMarker.icon = ContextCompat.getDrawable(this, android.R.drawable.ic_menu_mylocation)
@@ -141,17 +140,18 @@ class MainActivity : AppCompatActivity() {
         val key = "$text#$color"
         iconCache[key]?.let { return it }
         val d = resources.displayMetrics.density
-        val size = (34 * d).toInt()
+        val size = (40 * d).toInt()
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         p.color = Color.WHITE
+        p.setShadowLayer(3f * d, 0f, 0f, Color.BLACK)
         c.drawCircle(size / 2f, size / 2f, size / 2f, p)
         p.color = color
-        c.drawCircle(size / 2f, size / 2f, size / 2f - 3 * d, p)
+        c.drawCircle(size / 2f, size / 2f, size / 2f - 4 * d, p)
         p.color = Color.WHITE
         p.textAlign = Paint.Align.CENTER
-        p.textSize = 16 * d
+        p.textSize = 18 * d
         p.isFakeBoldText = true
         val y = size / 2f - (p.descent() + p.ascent()) / 2f
         c.drawText(text, size / 2f, y, p)
@@ -183,6 +183,23 @@ class MainActivity : AppCompatActivity() {
     private fun km(meters: Double) = String.format(Locale.getDefault(), "%.2f km", meters / 1000.0)
     private fun nm(s: Stop) = if (s.name.isBlank()) "locating…" else s.name
 
+    private fun formatDuration(ms: Long): String {
+        if (ms <= 0L) return "00:00"
+        val totalSeconds = ms / 1000L
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+        return if (hours > 0L) {
+            String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+        }
+    }
+
+    private fun formatTime(ms: Long): String {
+        return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
+    }
+
     private fun legsText(stops: List<Stop>): String {
         val sb = StringBuilder()
         for (i in 1 until stops.size) {
@@ -209,9 +226,20 @@ class MainActivity : AppCompatActivity() {
         val stops = TripTracker.stopsSnapshot()
         val running = TripTracker.running
         val finished = !running && TripTracker.endTime > 0
+        val elapsedMs = if (running) {
+            System.currentTimeMillis() - TripTracker.startTime
+        } else if (finished) {
+            TripTracker.endTime - TripTracker.startTime
+        } else {
+            0L
+        }
+        val legCount = maxOf(stops.size - 1, 0)
 
         tvDistance.text = km(TripTracker.distanceMeters)
         tvPoints.text = "GPS points: ${TripTracker.pointCount()}"
+        tvTripTime.text = formatDuration(elapsedMs)
+        tvLegCount.text = "$legCount"
+
         btnStart.isEnabled = !running
         btnMark.isEnabled = running && stops.isNotEmpty()
         btnStop.isEnabled = running
@@ -223,7 +251,7 @@ class MainActivity : AppCompatActivity() {
             running -> "Driving… tap MARK STOP at each location"
             finished -> {
                 val mins = (TripTracker.endTime - TripTracker.startTime) / 60000
-                "Trip finished • $mins min • ${maxOf(stops.size - 1, 0)} legs"
+                "Trip finished • $mins min • $legCount legs"
             }
             else -> "Ready"
         }
@@ -243,7 +271,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun redrawMap(finished: Boolean, stops: List<Stop>) {
         val pts = TripTracker.snapshot()
-        routeLine.setPoints(pts)
+
+        routePolylines.forEach { map.overlays.remove(it) }
+        routePolylines.clear()
 
         map.overlays.removeAll(stopMarkers)
         stopMarkers.clear()
@@ -253,6 +283,8 @@ class MainActivity : AppCompatActivity() {
             map.invalidate()
             return
         }
+
+        drawGradientRoute(pts)
 
         for ((i, s) in stops.withIndex()) {
             val color = when {
@@ -265,6 +297,7 @@ class MainActivity : AppCompatActivity() {
             m.icon = labelIcon(s.label, color)
             m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
             m.title = "${s.label}: ${nm(s)}"
+            m.subDescription = formatTime(s.time)
             stopMarkers.add(m)
         }
         map.overlays.addAll(stopMarkers)
@@ -290,6 +323,54 @@ class MainActivity : AppCompatActivity() {
             }
         }
         map.invalidate()
+    }
+
+    private fun drawGradientRoute(pts: List<GeoPoint>) {
+        if (pts.size < 2) return
+
+        val segmentSize = 10
+        for (i in 0 until pts.size - 1 step segmentSize) {
+            val endIdx = minOf(i + segmentSize, pts.size - 1)
+            val progress = i.toFloat() / pts.size.toFloat()
+            val color = interpolateColor(progress)
+
+            val segment = Polyline()
+            segment.outlinePaint.color = color
+            segment.outlinePaint.strokeWidth = 14f
+            segment.setPoints(pts.subList(i, endIdx + 1))
+            map.overlays.add(segment)
+            routePolylines.add(segment)
+        }
+    }
+
+    private fun interpolateColor(progress: Float): Int {
+        val colors = listOf(
+            Color.rgb(25, 118, 210),
+            Color.rgb(76, 175, 80),
+            Color.rgb(255, 193, 7),
+            Color.rgb(255, 152, 0),
+            Color.rgb(211, 47, 47)
+        )
+        val total = colors.size - 1
+        val scaled = (progress * total).coerceIn(0f, total.toFloat())
+        val index = scaled.toInt()
+        val nextIndex = (index + 1).coerceAtMost(total)
+        val ratio = scaled - index
+        return blendColors(colors[index], colors[nextIndex], ratio)
+    }
+
+    private fun blendColors(color1: Int, color2: Int, ratio: Float): Int {
+        val r1 = Color.red(color1)
+        val g1 = Color.green(color1)
+        val b1 = Color.blue(color1)
+        val r2 = Color.red(color2)
+        val g2 = Color.green(color2)
+        val b2 = Color.blue(color2)
+        return Color.rgb(
+            (r1 + (r2 - r1) * ratio).toInt(),
+            (g1 + (g2 - g1) * ratio).toInt(),
+            (b1 + (b2 - b1) * ratio).toInt()
+        )
     }
 
     private fun hasPermissions() =
