@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Bundle
+import android.preference.PreferenceManager
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -54,7 +55,8 @@ class MainActivity : AppCompatActivity() {
 
         // osmdroid setup: identify the app + keep tile cache inside app cache dir
         val cfg = Configuration.getInstance()
-        cfg.userAgentValue = packageName
+        cfg.userAgentValue = "DriveDistance/3.0 (Android; https://github.com/himansu-travelgrid/d4)"
+        cfg.load(this, PreferenceManager.getDefaultSharedPreferences(this))
         val base = File(cacheDir, "osmdroid")
         cfg.osmdroidBasePath = base
         cfg.osmdroidTileCache = File(base, "tiles")
@@ -96,9 +98,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap() {
         map.setTileSource(TileSourceFactory.MAPNIK)
+        map.setUseDataConnection(true)
         map.setMultiTouchControls(true)
+        map.isTilesScaledToDpi = true
         map.controller.setZoom(5.0)
-        map.controller.setCenter(GeoPoint(20.5937, 78.9629))   // India overview until first GPS fix
+        map.controller.setCenter(GeoPoint(20.5937, 78.9629))
 
         routeLine = Polyline()
         routeLine.outlinePaint.color = Color.rgb(25, 118, 210)
@@ -111,7 +115,6 @@ class MainActivity : AppCompatActivity() {
         meMarker.title = "You are here"
     }
 
-    /** Round badge with the stop letter (A, B, C ...) used as a map marker. */
     private fun labelIcon(text: String, color: Int): BitmapDrawable {
         val key = "$text#$color"
         iconCache[key]?.let { return it }
@@ -158,7 +161,6 @@ class MainActivity : AppCompatActivity() {
     private fun km(meters: Double) = String.format(Locale.getDefault(), "%.2f km", meters / 1000.0)
     private fun nm(s: Stop) = if (s.name.isBlank()) "locating…" else s.name
 
-    /** Leg-by-leg table:  A → B : place → place  (x.xx km)   + total */
     private fun legsText(stops: List<Stop>): String {
         val sb = StringBuilder()
         for (i in 1 until stops.size) {
@@ -247,13 +249,11 @@ class MainActivity : AppCompatActivity() {
         if (TripTracker.running) {
             meMarker.position = last
             map.overlays.add(meMarker)
-            // follow the vehicle
             if (map.zoomLevelDouble < 12.0) map.controller.setZoom(17.0)
             if (!map.boundingBox.contains(last.latitude, last.longitude) || pts.size == 1) {
                 map.controller.animateTo(last)
             }
         } else if (finished && !fittedAfterStop) {
-            // after the trip: zoom to show the whole route once
             fittedAfterStop = true
             if (pts.size > 1) {
                 map.post {
