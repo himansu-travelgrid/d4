@@ -48,6 +48,29 @@
                 android:layout_height="wrap_content"
                 android:text="GPS points: 0" />
         </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvTripTime"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="00:00"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvLegCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 legs"
+                android:textSize="16sp" />
+        </LinearLayout>
     </LinearLayout>
 
     <org.osmdroid.views.MapView
