@@ -60,11 +60,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val cfg = Configuration.getInstance()
-        cfg.userAgentValue = "DriveDistance/3.0 (Android; https://github.com/himansu-travelgrid/d4)"
+        cfg.userAgentValue = "DriveDistance/3.0 (Android; https://github.com/himansu-travelgrid/d4) osmdroid"
         cfg.load(this, PreferenceManager.getDefaultSharedPreferences(this))
         val base = File(cacheDir, "osmdroid")
         cfg.osmdroidBasePath = base
         cfg.osmdroidTileCache = File(base, "tiles")
+        // Ensure tile directory exists and is writable
+        cfg.osmdroidTileCache?.mkdirs()
 
         setContentView(R.layout.activity_main)
 
