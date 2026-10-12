@@ -2,6 +2,9 @@ package com.example.drivedistance
 
 import android.location.Location
 import org.osmdroid.util.GeoPoint
+import kotlin.math.acos
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** One saved point of the trip: A, B, C, D ... */
 class Stop(
@@ -21,6 +24,7 @@ class Stop(
 object TripTracker {
     private val points = mutableListOf<Location>()   // intermediate GPS points (temp)
     private val stops = mutableListOf<Stop>()        // A, B, C, D ...
+    private val plannedStops = mutableListOf<Stop>() // upcoming sales stops for route optimization
 
     @Volatile var distanceMeters = 0.0
     @Volatile var running = false
@@ -35,6 +39,7 @@ object TripTracker {
     @Synchronized fun reset() {
         points.clear()
         stops.clear()
+        plannedStops.clear()
         distanceMeters = 0.0
         startTime = System.currentTimeMillis()
         endTime = 0L
@@ -77,6 +82,14 @@ object TripTracker {
         return s
     }
 
+    @Synchronized fun addPlannedStop(label: String, lat: Double, lon: Double) {
+        plannedStops.add(Stop(label, lat, lon, System.currentTimeMillis(), 0.0))
+    }
+
+    @Synchronized fun clearPlannedStops() {
+        plannedStops.clear()
+    }
+
     private fun labelFor(index: Int): String =
         if (index < 26) ('A' + index).toString() else "S$index"
 
@@ -86,4 +99,64 @@ object TripTracker {
         points.map { GeoPoint(it.latitude, it.longitude) }
 
     @Synchronized fun stopsSnapshot(): List<Stop> = stops.toList()
+
+    @Synchronized fun plannedStopsSnapshot(): List<Stop> = plannedStops.toList()
+
+    /** Haversine distance in meters */
+    fun haversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2.0) * sin(dLat / 2.0) +
+            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+            sin(dLon / 2.0) * sin(dLon / 2.0)
+        val c = 2.0 * acos(a.coerceIn(-1.0, 1.0))
+        return r * c
+    }
+
+    /** Nearest-neighbor route optimization */
+    @Synchronized fun optimizeRoute(currentLat: Double, currentLon: Double): List<Stop> {
+        val remaining = plannedStops.toMutableList()
+        val ordered = mutableListOf<Stop>()
+        var curLat = currentLat
+        var curLon = currentLon
+        var totalMeters = 0.0
+
+        while (remaining.isNotEmpty()) {
+            var nearest: Stop? = null
+            var nearestDistance = Double.MAX_VALUE
+            for (stop in remaining) {
+                val d = haversineDistance(curLat, curLon, stop.lat, stop.lon)
+                if (d < nearestDistance) {
+                    nearestDistance = d
+                    nearest = stop
+                }
+            }
+            if (nearest == null) break
+            ordered.add(nearest)
+            totalMeters += nearestDistance
+            remaining.remove(nearest)
+            curLat = nearest.lat
+            curLon = nearest.lon
+        }
+
+        plannedStops.clear()
+        plannedStops.addAll(ordered)
+        toast = "Route optimized • ${String.format("%.1f", totalMeters / 1000.0)} km"
+        return ordered
+    }
+
+    @Synchronized fun getNextRecommendedStop(currentLat: Double, currentLon: Double): Stop? {
+        if (plannedStops.isEmpty()) return null
+        var nearest: Stop? = null
+        var nearestDistance = Double.MAX_VALUE
+        for (stop in plannedStops) {
+            val d = haversineDistance(currentLat, currentLon, stop.lat, stop.lon)
+            if (d < nearestDistance) {
+                nearestDistance = d
+                nearest = stop
+            }
+        }
+        return nearest
+    }
 }
