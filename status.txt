@@ -1,0 +1,4 @@
+java=success
+sdk=failure
+gradle_setup=success
+build=success
